@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.21.x"
+  WAILS_VERSION: "v3.0.0-beta.9"
+
+jobs:
+  package:
+    name: Package unsigned macOS arm64 release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
+
+      - name: Resolve version
+        id: version
+        run: |
+          plist_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/darwin/Info.plist)
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME#v}" != "$plist_version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match Info.plist version $plist_version. Bump the version (see README › Releasing) and retag."
+              exit 1
+            fi
+            version="$GITHUB_REF_NAME"
+          else
+            version="v${plist_version}-${GITHUB_SHA::7}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: wails3 task darwin:release VERSION="$VERSION"
+
+      # Runs after the build so frontend/dist exists for the embedded assets.
+      - name: Run tests
+        run: |
+          (cd frontend && pnpm test)
+          go test ./...
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: work-tools-local-${{ steps.version.outputs.version }}-macos-arm64
+          path: bin/release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$TAG" bin/release/* \
+            --title "Work Tools $TAG" \
+            --generate-notes \
+            --verify-tag \
+            $prerelease

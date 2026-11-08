@@ -92,6 +92,30 @@ tasks:
     cmds:
       - task: create:dmg
 
+  release:
+    summary: Builds distributable release artifacts in `bin/release`
+    desc: |
+      Packages the ad-hoc signed `.app` and styled `.dmg`, then stages a zipped
+      `.app`, the `.dmg`, and a `SHA256SUMS.txt` file in `bin/release`.
+      The version defaults to `v` + CFBundleShortVersionString from Info.plist.
+      Override with: wails3 task darwin:release VERSION=v0.1.0
+    platforms: [darwin]
+    deps:
+      - task: package:dmg
+    vars:
+      PLIST_VERSION:
+        sh: /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/darwin/Info.plist
+      VERSION: '{{.VERSION | default (print "v" .PLIST_VERSION)}}'
+      RELEASE_DIR: '{{.BIN_DIR}}/release'
+      ARTIFACT: '{{.APP_NAME}}-{{.VERSION}}-macos-arm64'
+    cmds:
+      - rm -rf "{{.RELEASE_DIR}}"
+      - mkdir -p "{{.RELEASE_DIR}}"
+      - ditto -c -k --keepParent "{{.BIN_DIR}}/{{.APP_NAME}}.app" "{{.RELEASE_DIR}}/{{.ARTIFACT}}.app.zip"
+      - cp "{{.BIN_DIR}}/{{.APP_NAME}}.dmg" "{{.RELEASE_DIR}}/{{.ARTIFACT}}.dmg"
+      - cd "{{.RELEASE_DIR}}" && shasum -a 256 "{{.ARTIFACT}}.app.zip" "{{.ARTIFACT}}.dmg" > SHA256SUMS.txt
+      - cat "{{.RELEASE_DIR}}/SHA256SUMS.txt"
+
   create:dmg:
     summary: Creates a configurable `.dmg` from the `.app` bundle
     platforms: [darwin]

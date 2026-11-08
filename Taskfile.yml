@@ -21,6 +21,11 @@ tasks:
     cmds:
       - task: darwin:package
 
+  release:
+    summary: Builds the .app zip, .dmg, and SHA-256 checksums in bin/release
+    cmds:
+      - task: darwin:release
+
   run:
     summary: Runs the application
     cmds:
